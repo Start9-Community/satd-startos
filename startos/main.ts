@@ -1,0 +1,233 @@
+import { healthFns } from '@start9labs/start-sdk'
+import { storeJson } from './fileModels/store.json'
+import { i18n } from './i18n'
+import { sdk } from './sdk'
+import {
+  bridgeSubnet,
+  GetBlockchainInfo,
+  p2pPorts,
+  rootDir,
+  satCliArgs,
+  satdMounts,
+} from './utils'
+
+export const main = sdk.setupMain(async ({ effects }) => {
+  /**
+   * `.const`, not `.once`: it re-runs main when the store changes, which is
+   * what makes the Network action take effect.
+   *
+   * Everything downstream is computed inside this function from `network` —
+   * satd-init's environment below, and the `--chain=${network}` on satd's own
+   * command line. None of that is wrong; it is simply never re-evaluated
+   * unless main runs again. With `.once` main did not, so the action wrote
+   * `signet` to the store and nothing else happened: the containers already
+   * running kept the arguments they had been started with, and the node went
+   * on syncing mainnet while the service page said signet, indefinitely.
+   * The action's own warning promises "changing the network restarts the node
+   * on a different chain"; re-entering main is what keeps that promise.
+   *
+   * interfaces.ts already reads the store this way, which is why the signet
+   * P2P port appeared on the switch while the daemon did not move.
+   */
+  const store = await storeJson.read().const(effects)
+  if (!store) throw new Error('No store')
+  const { network, mcpHostnames } = store
+
+  const satdSub = await sdk.SubContainer.eager(
+    effects,
+    { imageId: 'satd' },
+    satdMounts,
+    'satd-sub',
+  )
+
+  /**
+   * One read-only sat-cli call, parsed. Every outcome is a value: a node not
+   * answering yet reads as `starting`, and a call that cannot be run or whose
+   * reply cannot be parsed reads as `failure` — neither is a state satd
+   * reaches while running normally. `exec` rather than `execFail` because a
+   * non-zero exit is the expected signal here, not an error.
+   */
+  const probe = async <T>(
+    ...cmd: string[]
+  ): Promise<{ value: T } | { health: healthFns.HealthCheckResult }> => {
+    try {
+      const res = await satdSub.exec([...satCliArgs, ...cmd])
+      if (
+        res.exitCode !== 0 ||
+        typeof res.stdout !== 'string' ||
+        res.stdout === ''
+      ) {
+        return {
+          health: { result: 'starting' as const, message: i18n('satd is starting…') },
+        }
+      }
+      return { value: JSON.parse(res.stdout) as T }
+    } catch (e) {
+      return {
+        health: {
+          result: 'failure' as const,
+          message: i18n('Could not read ${cmd} from satd: ${error}', {
+            cmd: cmd[0],
+            error: String(e),
+          }),
+        },
+      }
+    }
+  }
+
+  return sdk.Daemons.of(effects)
+    /**
+     * StartOS creates the volume owned by root; the image runs as `satd`
+     * (uid 2121) and satd-init writes the CA, the config and the token into
+     * it. Cheap and idempotent, and without it the first start fails on the
+     * first write rather than on anything that names the cause.
+     */
+    .addOneshot('own-volume', {
+      subcontainer: satdSub,
+      exec: {
+        command: ['chown', '-R', 'satd:satd', rootDir],
+        user: 'root',
+      },
+      requires: [],
+    })
+    /**
+     * The same satd-init the reference stack and the appliance run, from the
+     * image, unmodified — it issues this install's CA and certificate,
+     * renders bitcoin.conf for the selected network, mints the MCP token and
+     * points `rpc-cookie` at the network's cookie. A package that
+     * re-implemented any of that would drift from the stack within a release.
+     *
+     * SATD_STACK_SUBNET becomes satd's `rpcallowip`. On StartOS every service
+     * shares one bridge with the OS at 10.0.3.1, so this range is what admits
+     * the OS reverse proxy and other packages; narrower and the RPC interface
+     * answers nothing.
+     */
+    .addOneshot('satd-init', {
+      subcontainer: satdSub,
+      exec: {
+        command: ['/usr/local/bin/satd-init'],
+        user: 'satd',
+        env: {
+          NETWORK: network,
+          SATD_MCP: '1',
+          SATD_STACK_SUBNET: bridgeSubnet,
+          // The name clients reach this server by. StartOS terminates TLS
+          // itself, so this only labels satd's own certificate — the one used
+          // on the bridge and for MCP.
+          SATD_TLS_HOSTNAME: 'satd.startos',
+          /**
+           * And the names they actually type, which are not that one.
+           *
+           * The OS proxy forwards the client's `Host` unchanged, and MCP's
+           * transport refuses any `Host` outside its allowlist — a
+           * DNS-rebinding defence, and on StartOS the only one, since the
+           * proxy does no `Host` validation itself. So every name a client
+           * uses has to be listed or its requests are answered 403.
+           *
+           * The package cannot work these out: `getHostInfo` carries only
+           * operator-added custom domains, the `.local` name comes from the
+           * server's hostname which no effect exposes, and the container's
+           * own hostname is a generated id. Hence the MCP Hostnames action.
+           *
+           * `.const` above is what makes editing that action take effect:
+           * main re-runs, satd-init re-renders the config, and satd restarts
+           * onto it. Same mechanism the Network action relies on.
+           */
+          SATD_MCP_ALLOWED_HOSTS: mcpHostnames,
+          SATD_P2P_PORT: String(p2pPorts[network]),
+          SATD_CA_EXPORT_HINT:
+            'the CA certificate is shown by this service’s "CA Certificate" action',
+        },
+      },
+      requires: ['own-volume'],
+    })
+    .addDaemon('satd', {
+      subcontainer: satdSub,
+      exec: {
+        // The network is an argument, never a config-file line: satd accepts
+        // `signet=1` in a file and then ignores it, silently running mainnet.
+        // `--chain=` because there are bare flags for the test networks but
+        // none for mainnet.
+        command: ['satd', `--datadir=${rootDir}`, `--chain=${network}`],
+        user: 'satd',
+        // A node writing out its chainstate should not be killed mid-flush.
+        sigtermTimeout: 600_000,
+      },
+      ready: {
+        display: i18n('Node'),
+        /**
+         * Liveness, not readiness. The probe is in the image and speaks HTTP
+         * over bash's /dev/tcp, so it needs no curl in this thin image; with
+         * no SATD_HEALTH_URL it sends a getblockchaininfo to the RPC port and
+         * counts any HTTP status line, which proves the listener is bound and
+         * serving.
+         *
+         * This deliberately does NOT probe /readyz. That endpoint is 503
+         * until the tip is within six blocks of the headers tip — days away
+         * on a fresh mainnet node — and this daemon's readiness is what
+         * `sync-progress` waits on. Gating it on a synced chain left the
+         * service reading "starting" and Blockchain Sync reading "waiting"
+         * for the entire initial sync, which is exactly the period the
+         * instructions tell the user to watch Blockchain Sync.
+         */
+        fn: async () => {
+          const res = await satdSub.exec(['/usr/local/bin/satd-healthcheck'])
+          return res.exitCode === 0
+            ? { result: 'success' as const, message: i18n('satd is ready') }
+            : {
+                result: 'starting' as const,
+                message: i18n('satd is starting…'),
+              }
+        },
+      },
+      requires: ['satd-init'],
+    })
+    .addHealthCheck('sync-progress', {
+      ready: {
+        display: i18n('Blockchain Sync'),
+        trigger: sdk.trigger.statusTrigger(30_000, {
+          starting: 5_000,
+          failure: 5_000,
+        }),
+        fn: async () => {
+          const res = await probe<GetBlockchainInfo>('getblockchaininfo')
+          if ('health' in res) return res.health
+          const info = res.value
+
+          if (!info.initialblockdownload)
+            return {
+              result: 'success' as const,
+              message: i18n('satd is fully synced'),
+            }
+
+          // At genesis the header chain is the only thing moving, so a block
+          // count there reads as stuck.
+          if (info.blocks === 0)
+            return {
+              result: 'loading' as const,
+              message: info.headers
+                ? i18n('Syncing block headers: ${count}', {
+                    count: info.headers,
+                  })
+                : i18n('Syncing block headers…'),
+            }
+
+          // Heights, not `verificationprogress`. satd 0.5.2 computes that
+          // field as the tip's timestamp over the current time, both in
+          // seconds since 1970, so a node at genesis reads about 69% and the
+          // figure barely moves for a year of blocks. A height pair is not a
+          // share of the work either — recent blocks cost far more than early
+          // ones — but it is true, and it says so rather than implying a
+          // percentage.
+          return {
+            result: 'loading' as const,
+            message: i18n('Syncing blocks: ${blocks} of ${headers}', {
+              blocks: info.blocks,
+              headers: info.headers,
+            }),
+          }
+        },
+      },
+      requires: ['satd'],
+    })
+})
