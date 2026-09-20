@@ -1,24 +1,18 @@
-import { readFile } from 'fs/promises'
+import { utils } from '@start9labs/start-sdk'
+import { storeJson } from '../fileModels/store.json'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
-import { rootDir, satdMounts } from '../utils'
 
-/**
- * The bearer token satd-init mints on first start. Only its hash is written
- * to the authfile, so this file is the only copy — regenerating it would
- * break every client already configured with it, which is why satd-init
- * never does.
- */
 export const mcpToken = sdk.Action.withoutInput(
   'mcp-token',
 
   async () => ({
-    name: i18n('MCP Token'),
+    name: i18n('Set MCP Token'),
     description: i18n(
-      'The bearer token an AI assistant needs to query this node',
+      'Generate a new bearer token for the MCP interface. Replaces the current one.',
     ),
     warning: i18n(
-      'Anyone holding this token can query this node through the MCP surface. Treat it as a password.',
+      'Replaces the current MCP token. Every assistant configured with it stops authenticating until it is updated.',
     ),
     allowedStatuses: 'any',
     group: null,
@@ -26,37 +20,20 @@ export const mcpToken = sdk.Action.withoutInput(
   }),
 
   async ({ effects }) => {
-    const token = await sdk.SubContainer.withTemp(
-      effects,
-      { imageId: 'satd' },
-      satdMounts,
-      'mcp-token',
-      async (subc) =>
-        readFile(`${subc.rootfs}${rootDir}/secrets/mcp-token`, 'utf8')
-          .then((t) => t.trim())
-          .catch(() => null),
-    )
+    const token = utils.getDefaultString({ charset: 'a-z,A-Z,0-9', len: 64 })
 
-    if (!token)
-      return {
-        version: '1' as const,
-        title: i18n('Not generated yet'),
-        message: i18n(
-          'satd-init mints the token on the first start. Start the service once, then run this action again.',
-        ),
-        result: null,
-      }
+    await storeJson.merge(effects, { mcpToken: token })
 
     return {
       version: '1' as const,
       title: i18n('MCP Token'),
       message: i18n(
-        'Send this as `Authorization: Bearer <token>` to the MCP interface.',
+        'Send this as `Authorization: Bearer <token>` to the MCP interface. Anyone holding it can query this node.',
       ),
       result: {
         type: 'single' as const,
         name: i18n('MCP Token'),
-        description: i18n('Bearer token'),
+        description: null,
         value: token,
         copyable: true,
         qr: false,

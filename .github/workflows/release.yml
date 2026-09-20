@@ -1,4 +1,3 @@
-# See build.yml for where this file runs.
 name: Release
 
 on:
@@ -8,10 +7,6 @@ on:
 
 jobs:
   release:
-    # Publishing needs Start9's signing key and registry credentials, which
-    # exist only in the Start9-Community fork. Anywhere else this job would
-    # fail on the missing secret rather than do anything.
-    if: github.repository_owner == 'Start9-Community'
     uses: Start9Labs/start-technologies/.github/workflows/release.yml@master
     with:
       RELEASE_REGISTRY: ${{ vars.RELEASE_REGISTRY }}

@@ -3,16 +3,6 @@ import { i18n } from '../i18n'
 import { sdk } from '../sdk'
 import { rootDir, satdMounts } from '../utils'
 
-/**
- * StartOS terminates TLS for everything this package exports, so a user does
- * not need this to reach the node from the LAN — that certificate is the
- * server's own and is already trusted.
- *
- * It is here for the two places satd's own certificate is what gets
- * presented: a client on the container bridge dialling satd's TLS listeners
- * directly, and the MCP surface, whose inward leg the OS re-wraps without
- * validating.
- */
 export const caCertificate = sdk.Action.withoutInput(
   'ca-certificate',
 

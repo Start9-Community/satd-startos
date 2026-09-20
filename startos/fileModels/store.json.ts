@@ -1,26 +1,21 @@
 import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-/**
- * StartOS-level state, which is why it lives here rather than in
- * bitcoin.conf: the network is passed to satd as a command-line argument on
- * every start, and satd accepts a `signet=1` line in a config file and then
- * ignores it — silently running mainnet. Writing it to the config file would
- * therefore look like it worked.
- */
-export const shape = z
-  .object({
-    network: z
-      .enum(['mainnet', 'signet', 'testnet4', 'testnet', 'regtest'])
-      .catch('mainnet'),
-    /**
-     * Comma-separated names for MCP's Host allowlist, from the MCP Hostnames
-     * action. Empty means loopback only, which is satd's own default and
-     * which refuses every request that arrives by name.
-     */
-    mcpHostnames: z.string().catch(''),
-  })
-  .strip()
+// The network is a command-line argument, never a config line: satd accepts a
+// `signet=1` line in bitcoin.conf and then runs mainnet regardless.
+export const shape = z.object({
+  network: z
+    .enum(['mainnet', 'signet', 'testnet4', 'testnet', 'regtest'])
+    .catch('mainnet'),
+  // Comma-separated names for MCP's Host allowlist; empty is loopback only.
+  mcpHostnames: z.string().catch(''),
+  // Core's rpcauth format, `user:salt$hmac`; the password itself is never kept.
+  rpcAuth: z.string().optional().catch(undefined),
+  // Written to secrets/mcp-token on every start; satd-init hashes it into the authfile.
+  mcpToken: z.string().optional().catch(undefined),
+  // One-shot: the next start runs with --reindex and clears it.
+  reindex: z.boolean().catch(false),
+})
 
 export const storeJson = FileHelper.json(
   {
