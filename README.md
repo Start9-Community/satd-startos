@@ -1,247 +1,270 @@
-# StartOS package
+<p align="center">
+  <img src="icon.webp" alt="satd Logo" width="21%">
+</p>
 
-A StartOS package for satd, built with Start9's TypeScript SDK. It is
-published from its own repository (`epochbtc/satd-startos`) — Start9's
-registry expects one repository per package — and lives here so it is
-reviewed and versioned with satd.
+# Bitcoin (satd) on StartOS
 
-**Contents: satd only** — the daemon, `sat-cli`, `sat-tui` and the MCP server.
-No Lightning, no BTCPay, no wallets: StartOS users compose those from their
-own marketplace, and a package that bundled a second copy of software the
-store already offers would be worse than useless.
+> Everything not listed in this document should behave the same as upstream
+> satd. If a feature, setting, or behavior is not mentioned here, the upstream
+> documentation is accurate and fully applicable — see the Documentation
+> section of `instructions.md` for links.
 
-**Image:** `ghcr.io/epochbtc/satd`, unmodified. It already carries `satd-init`
-and `mkca.sh`, so this package's first run is the same one the reference stack
-and the appliance perform and cannot drift from them.
+satd is a Bitcoin Core-compatible full node in Rust that serves an Electrum
+server, an Esplora REST API and an MCP server from one process. This package
+is the `satd` **flavor of the `bitcoind` package**: it installs in place of
+Bitcoin Core or Bitcoin Knots, never beside them, and switching between them
+keeps the block files. It runs the upstream image unmodified, drives its
+first-run script, and hands the network choice, the RPC credential and the
+MCP token to StartOS actions. See
+[the upstream project](https://github.com/epochbtc/satd) for the application
+itself.
 
-## Who terminates TLS
+---
 
-satd serves TLS itself on 8336 / 50002 / 3001, from a CA it generates per
-install. That is the right answer for the reference stack and the appliance,
-where nothing else can issue a certificate. It is the wrong answer here.
+## Table of Contents
 
-StartOS already terminates TLS at its reverse proxy, with a certificate
-chaining to the server's root CA — the one the user's browser trusts on that
-box. Exporting satd's own listeners would ask every user to import a second
-certificate authority for a single service.
+- [Image and Container Runtime](#image-and-container-runtime)
+- [Volume and Data Layout](#volume-and-data-layout)
+- [File Models](#file-models)
+- [Dependencies](#dependencies)
+- [Network Access and Interfaces](#network-access-and-interfaces)
+- [Installation and First-Run Flow](#installation-and-first-run-flow)
+- [Actions](#actions)
+- [Tasks](#tasks)
+- [Health Checks](#health-checks)
+- [Backups and Restore](#backups-and-restore)
+- [Limitations and Differences](#limitations-and-differences)
+- [Quick Reference for AI Consumers](#quick-reference-for-ai-consumers)
 
-So this package binds satd's **plain** listeners and lets the OS wrap them.
-satd's TLS listeners still run, unexported, which leaves them on `lo` and
-`lxcbr0` and off the LAN. satd-init is used unmodified.
+---
 
-MCP is the exception: satd refuses to start with MCP bound off-loopback unless
-TLS and auth are both configured, so that listener speaks TLS from satd's own
-certificate. The OS re-wraps it — terminating the client's connection with the
-server's certificate and opening a fresh one inward — with
-`upstreamCertValidation: 'disable'`, because the inward leg presents a
-certificate from satd's per-install CA that the OS has no way to be taught.
+## Image and Container Runtime
 
-This is a deliberate departure from the interface table this file used to
-carry, which specified satd's own TLS ports. That table was written without
-reference to how StartOS handles TLS.
+One subcontainer, `satd-sub`, runs the unmodified upstream image on x86_64 and
+aarch64. The package supplies its own commands rather than the image's
+entrypoint: two oneshots run before the daemon on every start.
 
-## Building
+| Step        | Command                     | User   | Purpose                                                                                                                  |
+| ----------- | --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `own-volume` | `chown -R satd:satd`       | `root` | StartOS mounts the volume root-owned; the image runs as `satd` (uid 2121).                                               |
+| `satd-init` | `/usr/local/bin/satd-init` | `satd` | The image's own first-run script: issues the per-install CA, renders `bitcoin.conf` for the network, hashes the MCP token into the authfile. |
+| `satd`      | `satd --datadir --chain …` | `satd` | The node. `--rpcauth` is appended once the RPC credential has been set.                                                   |
 
-Requires Node 22+, Docker, `jq`, and:
+`satd-init` is driven by environment: `NETWORK`, `SATD_P2P_PORT`,
+`SATD_STACK_SUBNET` (the container bridge, rendered as `rpcallowip`),
+`SATD_MCP=1`, `SATD_MCP_ALLOWED_HOSTS` and `SATD_TLS_HOSTNAME=satd.startos`.
 
-- **`start-cli` 2.0+** — from
-  [`Start9Labs/start-technologies` releases](https://github.com/Start9Labs/start-technologies/releases)
-  (`start-cli_x86_64-linux`). Note that `Start9Labs/shared-workflows` is the
-  *legacy* build line and pins start-cli `v0.4.0-beta.9`; the SDK 2.0 line
-  this package targets uses `start-technologies` instead.
-- **`squashfs-tools-ng`** *and* **`squashfs-tools`** — two separate projects,
-  and `pack` needs a binary from each: `tar2sqfs` from the former to turn each
-  image layer set into a squashfs, `mksquashfs` from the latter for the
-  `.s9pk` itself. A build with only one of them fails partway with a bare
-  `No such file or directory` naming the missing binary. Homebrew has no
-  `squashfs-tools-ng` formula, so on macOS this step wants a `linux/arm64`
-  container rather than a host toolchain.
-- **A container runtime.** `pack` resolves the image pinned in the manifest
-  and embeds its layers. `start-cli` reaches for `podman` first and reports
-  `Docker Error: podman: No such file or directory` when it is absent, even
-  with Docker working — set `STARTOS_USE_PODMAN=false` to use Docker.
-- **A packaging workspace in the parent directory.** `start-cli` looks for a
-  `.startos/` marker in the directory *containing* the package repo, so
-  `contrib/packaging/.startos/` has to exist. Create it with
-  `cd contrib/packaging && start-cli s9pk init-workspace` — note that also
-  clones the whole `start-technologies` monorepo beside it, which is not
-  wanted here. An empty `.startos/` is *not* enough: start-cli 2.0.0 refuses
-  to pack with `Uninitialized: No packaging workspace found` unless it holds
-  the `config.yaml` and `build.key.pem` that `init-workspace` generates. Run
-  it in a scratch directory and copy those two files across to avoid the
-  clone. `.startos/` is gitignored because it holds a per-machine signing key.
+## Volume and Data Layout
 
-Then:
+Everything lives on one volume, `main`, mounted at `/var/lib/satd` — satd's
+datadir.
 
-```sh
-make            # typecheck, test, lint, bundle, and pack every arch
-make x86        # just x86_64
-make install    # sideload to the server in ~/.startos/config.yaml
+| Path                    | Contents                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| `blocks/`, `chainstate/` | Mainnet chain and chainstate; every index satd keeps lives inside `chainstate/`.      |
+| `<network>/`            | The same layout for each non-mainnet network (`signet/`, `testnet4/`, …).             |
+| `bitcoin.conf`          | Rendered by `satd-init` on every start; never edit it.                                |
+| `tls/`                  | The per-install CA and the certificate satd's own TLS listeners present.              |
+| `secrets/mcp-token`     | The MCP bearer token, written by the package from `startos-store.json` on every start. |
+| `authfile.toml`         | The token's hash, rendered by `satd-init`.                                            |
+| `rpc-cookie`            | A symlink `satd-init` points at the live network's cookie.                            |
+| `startos-store.json`    | This package's own state (below).                                                     |
+| `store.json`            | Bitcoin Core's package state, left in place across a flavor switch.                   |
+
+## File Models
+
+One model, `startos-store.json`, holds the state StartOS owns: the network,
+the MCP hostnames, the RPC credential's `rpcauth` line (hash only), the MCP
+token, and a one-shot `reindex` flag. It is seeded at install with mainnet and
+a freshly generated token, and rewritten only by the actions and the flavor
+migration. A hand edit is read on the next start; `reindex: true` puts
+`--reindex` on the next start and is cleared as satd launches.
+
+`store.json` is Bitcoin Core's own store, modelled here only for its
+`reindexBlockchain` flag, which the switch back to Core sets.
+
+`bitcoin.conf` is deliberately not a model: `satd-init` regenerates it from the
+template inside the image on every start, so an edit does not survive a
+restart. The network is passed on satd's command line rather than written to
+the file, because satd accepts a network line in `bitcoin.conf` and then runs
+mainnet regardless. Operator additions belong in `conf.d/local.conf`, which
+`satd-init` appends last.
+
+## Dependencies
+
+None. satd serves its own Electrum and Esplora surfaces.
+
+Being a flavor, this package satisfies no other service's dependency on
+`bitcoind`: a version range written for Core or Knots (`>=28.4:17`, …) never
+matches `#satd:…`, so Lightning, electrs, Mempool and the rest report Bitcoin
+as unsatisfied while satd is installed. satd publishes no `rawblock` /
+`rawtx` ZMQ topics, so that is correct rather than conservative; a dependent
+that has verified itself against satd can opt in with `|| #satd:>=0.5.2:0`.
+
+## Network Access and Interfaces
+
+| Interface id | Type  | Internal port | Protocol                   | Serves                                                                                              |
+| ------------ | ----- | ------------- | -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `rpc`        | `api` | 8332          | HTTP, TLS added by the OS  | Bitcoin Core-compatible JSON-RPC. Cookie auth inside the container; the **Set RPC Credentials** password from anywhere else. |
+| `electrum`   | `api` | 50001         | raw TCP, `tcp://` / `ssl://` | The Electrum server, for Sparrow, Electrum, BlueWallet, Zeus.                                      |
+| `esplora`    | `api` | 3000          | HTTP, TLS added by the OS  | The Esplora REST API under `/api`, unauthenticated.                                                 |
+| `mcp`        | `api` | 8339          | HTTPS, rewrapped by the OS | The MCP server. Bearer token required; `Host` must be listed under **MCP Hostnames**.                |
+| `peer`       | `p2p` | 8333 / 38333 / 48333 / 18333 / 18444 | raw TCP       | Inbound Bitcoin P2P. The port follows the network.                                                  |
+
+satd's own TLS listeners (8336, 50002, 3001) are left unexported. MCP is
+the one listener satd insists on serving over its own TLS off-loopback, so the
+OS terminates the client's connection and opens a fresh one inward with
+certificate validation disabled — the inward leg presents a certificate from
+satd's per-install CA, which the OS cannot be taught. satd validates MCP's
+`Host` header against an allowlist, and the OS proxy forwards the client's
+`Host` unchanged, so every name a client uses has to be entered through **MCP
+Hostnames**; a request by any other name is answered `403`.
+
+## Installation and First-Run Flow
+
+Install seeds the store with mainnet and a generated MCP token; the node starts
+syncing mainnet on the first start with no prompt. `satd-init` mints the CA and
+renders the config on that start, so **CA Certificate** has nothing to show
+until the service has run once. Nothing else is pre-configured: the RPC
+interface answers only cookie auth until **Set RPC Credentials** is run, and MCP
+answers `403` by hostname until **MCP Hostnames** is set.
+
+**Installing over Bitcoin Core or Knots is a flavor switch**, and
+`migrations.other` (keyed by Core's major series and the Knots flavor)
+handles it in both directions. `blocks/` is shared as-is — satd reads Core's
+`blk*.dat`/`rev*.dat` layout and honours Core's `xor.dat` key — and
+everything implementation-specific is rebuilt from it:
+
+- **Core → satd (`up`)**: removes Core's `chainstate/`, `indexes/`,
+  `peers.dat` and `mempool.dat` and sets `reindex: true`, so satd's first
+  start replays every block from the files into its own chainstate and
+  indices. Verified on a Core-synced signet datadir: 322,807 headers indexed
+  from the files, Core's tip selected, replay validated with no download.
+- **satd → Core (`down`)**: removes satd's `chainstate/`,
+  `chainstate_background/`, rendered `bitcoin.conf`, `authfile.toml`,
+  `rpc-cookie`, `tls/`, `secrets/`, `peers.dat`, `mempool.dat` and
+  `startos-store.json`, and sets `reindexBlockchain: true` in Core's
+  `store.json` so Core reindexes from the same files. Core comes back with a
+  default configuration. **This direction has not been run.**
+
+The switch is a full reindex: satd validates every block again and rebuilds
+the transaction and address indices. On mainnet that is days, not hours. Do
+not stop the service, reboot, or run an action that restarts satd while it
+runs — see Limitations.
+
+## Actions
+
+Five actions, all user-facing. Every one that changes a setting writes the
+store, and the daemon chain re-runs on the change: `satd-init` re-renders the
+config and satd restarts.
+
+### `network` — Network
+
+- **When to run it:** to move the node to signet, testnet4, testnet3 or regtest, or back to mainnet.
+- **What it changes:** the `network` key, then the chain satd runs and the P2P port the `peer` interface binds.
+- **Cost:** a restart, then a full sync of the new network. Each network's data sits in its own directory, so switching back finds the old chain where it was left.
+- **Repeat safety:** idempotent; submitting the current network changes nothing.
+- **Outputs:** none.
+
+### `rpc-credentials` — Set RPC Credentials
+
+- **When to run it:** before pointing a Core-compatible client at the RPC interface from off the bridge, and whenever the password should change.
+- **What it changes:** the `rpcAuth` key — a Core-format `rpcauth` line for the fixed username `satd`, passed to satd on its command line. Only the salted hash is kept; the password is shown once.
+- **Cost:** a restart.
+- **Repeat safety:** every run replaces the password; clients using the old one stop authenticating. The metadata carries a confirmation warning once a credential exists.
+- **Outputs:** the username and the new password.
+
+### `mcp-token` — Set MCP Token
+
+- **When to run it:** before connecting an assistant to MCP — the token seeded at install is never shown — and whenever it should rotate.
+- **What it changes:** the `mcpToken` key, written to `secrets/mcp-token` on the next start and hashed into `authfile.toml` by `satd-init`.
+- **Cost:** a restart.
+- **Repeat safety:** every run replaces the token; assistants using the old one get `401`.
+- **Outputs:** the new token.
+
+### `mcp-hostnames` — MCP Hostnames
+
+- **When to run it:** before MCP is used at all, and again when clients start reaching the server by a new name or address.
+- **What it changes:** the `mcpHostnames` key, rendered by `satd-init` as one `mcpallowedhost=` line per entry.
+- **Cost:** a restart.
+- **Repeat safety:** idempotent. Loopback and the certificate's own name are always accepted and need not be listed.
+- **Outputs:** none.
+
+### `ca-certificate` — CA Certificate
+
+- **When to run it:** when a client on the container bridge dials one of satd's own TLS listeners directly, or when an MCP client validates the inward certificate. Clients coming through the OS proxy do not need it.
+- **What it changes:** nothing; it reads `tls/ca.crt`.
+- **Cost:** a few seconds in a temporary container.
+- **Repeat safety:** idempotent. Before the first start it reports that the CA has not been generated yet.
+- **Outputs:** the PEM certificate authority.
+
+## Tasks
+
+None. The service is never held on a prompt; every action is optional.
+
+## Health Checks
+
+- **`satd` — Node.** Runs the image's `satd-healthcheck`, which sends a `getblockchaininfo` to the RPC listener and counts any HTTP reply. It goes green as soon as the listener is up, deliberately ahead of readiness: satd's `/readyz` stays `503` until the tip is within six blocks of the headers tip, which on a fresh mainnet node is days. `starting` past the first minute means satd is not binding RPC — read the daemon log.
+- **`sync-progress` — Blockchain Sync.** Polls `getblockchaininfo` every 30 s (5 s while starting or failing). `loading` with a block count against the header count is initial block download; the count runs well ahead of the time remaining because early blocks are small. It reports heights rather than `verificationprogress`, which satd derives from timestamps and reads about 69 % at genesis. `failure` names the `sat-cli` error; `starting` means the node is not answering RPC yet.
+
+## Backups and Restore
+
+Strategy: the `main` volume copied wholesale, minus the chain. `blocks/`,
+`chainstate/`, `chainstate_background/`, `mempool.dat`, `.cookie` and the
+`rpc-cookie` symlink are excluded at the root and under every network
+directory, so a backup holds the CA and certificate, the MCP token, the
+authfile, the rendered config and the store — kilobytes, not hundreds of
+gigabytes. A restored instance keeps its network, RPC credential, MCP token,
+hostnames and CA, comes back stopped, and re-downloads the chain from the
+network once started.
+
+## Limitations and Differences
+
+1. **A flavor switch that is interrupted re-downloads the rest of the chain.** satd ignores SIGTERM while connecting blocks, so a stop during the reindex becomes a kill after `sigtermTimeout`; on the next start satd does not resume from the block files already on disk but goes back to network IBD from the last flushed tip, writing the re-downloaded blocks into new `blk*.dat` files beside the originals. Both are upstream defects; until they are fixed the switch must run uninterrupted.
+2. **No pruning.** Electrum and Esplora both require the transaction and address indices, which are incompatible with pruning; the upstream template runs fully indexed.
+3. **Not a drop-in for Core or Knots.** satd speaks Core's JSON-RPC but publishes no `rawblock` / `rawtx` ZMQ topics; see Dependencies for what that means for other services.
+4. **No wallet.** satd is a node; wallets connect through the Electrum interface.
+5. **satd's own TLS listeners are not exported**, and its metrics endpoint (9332) is not exposed at all.
+6. **One RPC credential**, with the fixed username `satd`; there is no multi-user `rpcauth` management.
+
+---
+
+## Quick Reference for AI Consumers
+
+```yaml
+package_id: 'bitcoind'
+flavor: satd
+image: ghcr.io/epochbtc/satd
+architectures: [x86_64, aarch64]
+subcontainers: [satd-sub]
+volumes:
+  main: /var/lib/satd
+file_models:
+  - startos-store.json
+  - store.json
+startos_managed_env_vars:
+  - NETWORK
+  - SATD_MCP
+  - SATD_STACK_SUBNET
+  - SATD_TLS_HOSTNAME
+  - SATD_MCP_ALLOWED_HOSTS
+  - SATD_P2P_PORT
+  - SATD_CA_EXPORT_HINT
+dependencies: none
+interfaces:
+  rpc: { type: api, port: 8332 }
+  electrum: { type: api, port: 50001 }
+  esplora: { type: api, port: 3000 }
+  mcp: { type: api, port: 8339 }
+  peer: { type: p2p, port: 8333 }
+actions:
+  - network
+  - rpc-credentials
+  - mcp-token
+  - mcp-hostnames
+  - ca-certificate
+tasks: []
+health_checks:
+  - satd
+  - sync-progress
 ```
-
-`make` runs `tsc --noEmit`, the tests, the SDK's lint pass and `ncc` before it
-packs, so a type error or a failing test stops the build.
-
-The SDK ships the entire build as `s9pk.mk`; the `Makefile` here is one
-`include` line.
-
-`make` itself cannot run in CI — packing wants `start-cli`, `tar2sqfs` and a
-signing workspace, and `make install` wants a server. The parts that can are
-gated by the **app-store packages** job in `.github/workflows/appliance.yml`:
-`npm ci`, `tsc --noEmit`, the tests, and the `ncc` bundle. It runs on any PR
-touching this directory, and also on one touching
-`contrib/stack/satd/satd-init`, because `test/networks.test.ts` reads that
-file — gating only on this directory would skip the drift check on the very
-change that causes drift.
-
-### The lockfile advisories
-
-`npm audit` reports high-severity DoS advisories against `brace-expansion`
-and `js-yaml`, and they cannot be fixed here. `@start9labs/start-sdk`
-declares `bundleDependencies: [@start9labs/start-core, eslint,
-typescript-eslint]`, which makes 127 of the 158 entries in
-`package-lock.json` `inBundle: true` — files inside the SDK's tarball rather
-than edges npm resolves. `overrides` regenerates the lockfile and leaves
-those versions exactly as they were, and 2.0.9 is the newest SDK published.
-
-Nine alerts over five instances: three advisory ranges each against
-`brace-expansion` 1.1.15 (at three paths), `brace-expansion` 5.0.6, and
-`js-yaml` 4.2.0. Every one sits under the SDK's bundled `eslint`,
-`@eslint/eslintrc`, `@eslint/config-array` or
-`@typescript-eslint/typescript-estree`. GitHub scopes them `runtime`, which
-reflects their sitting inside a runtime package, not anything at runtime
-reaching them.
-
-That toolchain does run. `s9pk.mk` calls the SDK's `lint.mjs` as part of the
-`javascript/index.js` build gate, so eslint executes on every `make` — the
-reachability argument cannot rest on nothing invoking it. What does not run
-is the vulnerable code. Instrumenting all five instances and running the
-whole gate (`lint.mjs`, `npm run check`, `npm run build`):
-
-- `brace-expansion` is required by `minimatch` — eight loads — and its
-  export is called **zero** times. The advisories are all about expanding
-  `{}` groups, and the only glob in play is `startos/**/*.ts`, which has no
-  braces. `eslint.config.base.mjs` supplies exactly that one pattern.
-- `js-yaml` is **never loaded**. `lint.mjs` passes `overrideConfigFile: true`
-  with an inline config, so `eslintrc` never searches for a YAML config file
-  to parse.
-
-None of it ships, either. `javascript/index.js` requires nothing outside
-Node's builtins, and carries no `brace-expansion` or `js-yaml` code — its
-only matches for `eslint` are `eslint-disable` comments in vendored source.
-One false lead worth recording: the bundle does contain
-`tag:yaml.org,2002:`, 102 times. That is `yaml` 2.9.0, a different library
-under no advisory here — `YAMLParseError` and `LineCounter` are present,
-`YAMLException` and `DEFAULT_SCHEMA` are not.
-
-The nine alerts are dismissed as `not_used` on that evidence.
-`.github/dependabot.yml` scopes an `ignore` to those two package names, so
-an advisory against something this package really does resolve still
-surfaces.
-
-## Status
-
-Installed and run on **StartOS 0.4.0.1** (x86_64), sideloaded with
-`start-cli package install -s`. What that proved:
-
-- satd-init runs unmodified from the image and produces this install's CA,
-  certificate, MCP token, `authfile.toml` and `bitcoin.conf`, all owned by
-  `satd` with the right modes.
-- The node syncs, and both health checks report as documented — **Node**
-  "satd is ready", **Blockchain Sync** "Syncing blocks: …%".
-- Every exported interface answers through StartOS's reverse proxy with a
-  certificate chaining to the server's root CA: Esplora
-  `GET /api/blocks/tip/height` → 200, Electrum `server.version` →
-  `satd-electrs-compatible`, both verifying against that CA with
-  `Verify return code: 0 (ok)`. MCP is 401 without a token and, once the
-  **MCP Hostnames** action names the address the client uses, returns a full
-  `initialize` result with the token the **MCP Token** action prints.
-- The **Network** action moves a running node between chains, re-rendering
-  the config and rebinding the P2P port each time.
-
-Three defects came out of it, none of them visible to a typecheck: the ready
-gate probed `/readyz` and so never went green during a sync; the **Network**
-action wrote the store without restarting the node; and the manifest pinned
-an image tag that predates `satd-init`, so the package as first written could
-not have started at all.
-
-`bridgeSubnet` is now checked rather than assumed — the `rpcallowip` range it
-feeds is what admits the OS proxy on the real bridge, and the RPC interface
-answers.
-
-Also checked, now on every PR that touches this directory: the package
-typechecks against `@start9labs/start-sdk` 2.0.9, `test/networks.test.ts`
-verifies the network list and every P2P port against
-`contrib/stack/satd/satd-init` itself so the two cannot drift (which is why
-a change to that file runs this job too), and
-`test/reactivity.test.ts` guards the two defects above that a typecheck
-cannot see.
-
-The `aarch64` package has since been built and installed the same way, on an
-arm64 machine, against StartOS 0.4.0.1. Everything above holds there: the
-image's binaries are genuinely `aarch64` (`e_machine` 0xb7, not an emulated
-x86_64), satd-init produces the same artefacts, the node syncs, and every
-interface answers through the proxy. Nothing failed for a reason that had
-anything to do with the architecture.
-
-That install is also what surfaced the fourth defect, which x86_64 would have
-shown just as readily had anything reached MCP by name: satd left the MCP
-transport's `Host` allowlist at its loopback-only default, so every request
-arriving by hostname was answered 403 before authentication ran. The StartOS
-proxy forwards the client's `Host` unchanged and performs no validation of
-its own, which makes satd's check the only DNS-rebinding defence on that
-path — so it is kept, and the **MCP Hostnames** action is how the names
-clients use reach it. The package cannot derive them: `getHostInfo` carries
-only operator-added custom domains, the `.local` name comes from the server's
-own hostname, which no effect exposes, and the container's hostname is a
-generated id.
-
-Still unverified: backup and restore. The exclusions were corrected against a
-datadir satd 0.5.2 actually wrote: they named Bitcoin Core's `indexes/` and
-`debug.log`, which satd never creates, and missed `chainstate_background/`,
-which it does. `test/backups.test.ts` checks the names against satd's storage
-code. Whether a restore brings back a working node has not been tried.
-
-The **Blockchain Sync** check used to print `verificationprogress` as a
-percentage. satd 0.5.2 computes that field from timestamps, so a node at
-genesis reported roughly 69%. It now shows the block count against the header
-count.
-
-## Publishing
-
-Start9's community registry takes packages by email and then owns them:
-
-1. The package goes in a public repository, `epochbtc/satd-startos`, with
-   `main` as its default branch. `contrib/packaging/sync-store.sh startos`
-   fills a clean clone of it from this directory.
-2. Email **submissions@start9.com** with the link.
-3. Start9 forks it into `Start9-Community` and reviews it as a pull request on
-   the fork. **The fork is the upstream from then on**: every later version is
-   a pull request against it, synced from here the same way.
-4. A merged pull request builds, tags and publishes to **community-beta**.
-5. Promotion to **community production** is ours to ask for, by email.
-
-`.github/workflows/` holds the four workflows accepted packages use. They are
-inert here, since GitHub only runs workflows at a repository's root, and live
-once synced. `build.yml` runs on pull requests with no signing key. The other
-three publish, need Start9's key, and run only in the `Start9-Community` fork.
-
-The version tag is the package version with `:` replaced by `_` and no
-prefix: `0.5.2:0` is tagged `v0.5.2_0`.
-
-Two tests read satd's own files. Outside this repository `test/upstream.ts`
-falls back to copies the sync vendors into `test/upstream/`, from the same satd
-commit; the storage-layout test has no copy and skips.
-
-For each release:
-
-1. Bump the image tag and digest in `startos/manifest/index.ts` and the
-   version and release notes in `startos/versions/current.ts`. A new
-   upstream version resets the revision to `0`; a package-only change bumps
-   it.
-2. Install it on a StartOS box and confirm every interface answers.
-3. Sync, review the diff, and push, or open the pull request against the fork:
-
-   ```sh
-   contrib/packaging/sync-store.sh startos ../satd-startos
-   ```

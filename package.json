@@ -9,6 +9,9 @@
   "dependencies": {
     "@start9labs/start-sdk": "2.0.9"
   },
+  "overrides": {
+    "@start9labs/start-sdk": "$@start9labs/start-sdk"
+  },
   "devDependencies": {
     "@types/node": "^22.19.7",
     "@vercel/ncc": "^0.38.4",

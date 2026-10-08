@@ -21,32 +21,13 @@ import {
   rpcPort,
 } from './utils'
 
-/**
- * Who terminates TLS.
- *
- * satd serves TLS itself on 8336 / 50002 / 3001 from a CA it generates per
- * install. That is the right answer for the reference stack and the
- * appliance, where nothing else can issue a certificate. It is the wrong
- * answer here: StartOS already terminates TLS at its reverse proxy with a
- * certificate chaining to this server's root CA, which every client the user
- * has set up already trusts. Exporting satd's own listeners instead would ask
- * each user to import a second CA for one service.
- *
- * So the plain listeners are what get bound, and the OS wraps them. satd's
- * TLS listeners still run — satd-init is used unmodified, which is what keeps
- * this package from drifting away from the stack — they simply are not
- * exported, which leaves them on `lo` and `lxcbr0` and off the LAN.
- *
- * MCP is the one exception, below.
- */
+// satd's own TLS listeners stay unexported; the OS terminates TLS for the
+// plain ones. MCP is the exception: satd refuses a non-loopback MCP bind
+// without its own TLS, so the OS rewraps that one.
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
-  const network = (await storeJson.read((s) => s.network).const(effects)) ?? 'mainnet'
+  const network =
+    (await storeJson.read((s) => s.network).const(effects)) ?? 'mainnet'
 
-  // --- JSON-RPC -----------------------------------------------------------
-  // `http` rather than a raw binding: it publishes both a plaintext bridge
-  // address for other packages on lxcbr0 and a TLS-terminated one for the
-  // LAN, which is the split Core-compatible clients expect. Cookie auth is
-  // unchanged and is still satd's.
   const rpcOrigin = await sdk.MultiHost.of(effects, rpcHostId).bindPort(
     rpcPort,
     { protocol: 'http', preferredExternalPort: rpcPort },
@@ -63,12 +44,6 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     query: {},
   })
 
-  // --- Electrum -----------------------------------------------------------
-  // Not HTTP: the Electrum protocol is line-delimited JSON over a raw TCP
-  // socket, so the OS adds TLS in front of the plaintext listener rather than
-  // proxying requests. No X-Forwarded headers — there is no request to put
-  // them on — and no ALPN, which is an HTTP/2 negotiation Electrum clients do
-  // not speak.
   const electrumOrigin = await sdk.MultiHost.of(
     effects,
     electrumHostId,
@@ -91,15 +66,12 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     ),
     type: 'api',
     masked: false,
-    schemeOverride: null,
+    schemeOverride: { ssl: 'ssl', noSsl: 'tcp' },
     username: null,
     path: '',
     query: {},
   })
 
-  // --- Esplora ------------------------------------------------------------
-  // Unauthenticated, as every public Esplora deployment is: it serves public
-  // chain data. The prefix is satd's `esploraprefix`.
   const esploraOrigin = await sdk.MultiHost.of(effects, esploraHostId).bindPort(
     esploraPort,
     {
@@ -120,29 +92,14 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     query: {},
   })
 
-  // --- MCP ----------------------------------------------------------------
-  // The exception. satd refuses to start with MCP bound off-loopback unless
-  // TLS and auth are both configured, so this listener speaks TLS from satd's
-  // own certificate and cannot be handed over as plaintext.
-  //
-  // `secure.ssl` says the container's port is already TLS; `addSsl` makes the
-  // OS terminate the client's connection with the server's own certificate
-  // and open a fresh one inward. That inward leg is what
-  // `upstreamCertValidation: 'disable'` covers: it is a hop across lxcbr0 to
-  // a certificate from satd's per-install CA, which the OS has no reason to
-  // trust and no way to be taught. Without it the OS validates against the
-  // StartOS root CA and every MCP request fails.
+  // The inward leg presents a certificate from satd's per-install CA.
   const mcpOrigin = await sdk.MultiHost.of(effects, mcpHostId).bindPort(
     mcpPort,
     {
-      protocol: null,
+      protocol: 'https',
       preferredExternalPort: mcpPort,
-      secure: { ssl: true },
       addSsl: {
         preferredExternalPort: mcpPort,
-        addXForwardedHeaders: true,
-        alpn: null,
-        auth: null,
         upstreamCertValidation: 'disable',
       },
     },
@@ -154,18 +111,13 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
       'Model Context Protocol server, so an AI assistant can query this node',
     ),
     type: 'api',
-    masked: true,
+    masked: false,
     schemeOverride: null,
     username: null,
     path: '',
     query: {},
   })
 
-  // --- P2P ----------------------------------------------------------------
-  // The port follows the chain, because other nodes rely on the convention.
-  // No TLS in either direction: the Bitcoin P2P protocol has its own
-  // encrypted transport (BIP 324) and wrapping it in TLS would make this node
-  // unreachable to every peer.
   const peerOrigin = await sdk.MultiHost.of(effects, peerHostId).bindPort(
     p2pPorts[network],
     {
@@ -181,7 +133,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     description: i18n('Listens for connections from other Bitcoin nodes'),
     type: 'p2p',
     masked: false,
-    schemeOverride: { ssl: null, noSsl: null },
+    schemeOverride: null,
     username: null,
     path: '',
     query: {},
