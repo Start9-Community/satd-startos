@@ -116,6 +116,10 @@ export const main = sdk.setupMain(async ({ effects }) => {
             ...(rpcAuth ? [`--rpcauth=${rpcAuth}`] : []),
             ...(reindex ? ['--reindex'] : []),
           ],
+          // StartOS hands every daemon RUST_LOG=warn,start_core=debug, and satd
+          // honors RUST_LOG over its default of info: without this the log
+          // shows warnings only, with no sync, reindex or shutdown progress.
+          env: { RUST_LOG: 'info' },
           user: 'satd',
           sigtermTimeout: 600_000,
         },
