@@ -133,9 +133,12 @@ answers `403` by hostname until **MCP Hostnames** is set.
 `migrations.other` (keyed by Core's major series and the Knots flavor)
 handles it in both directions. `blocks/` is shared as-is — satd reads Core's
 `blk*.dat`/`rev*.dat` layout and honours Core's `xor.dat` key — and
-everything implementation-specific is rebuilt from it:
+everything implementation-specific is rebuilt from it. Both directions remove
+chainstate and peer/mempool state at the root and in every supported network
+directory, leaving each network's `blocks/` untouched:
 
-- **Core → satd (`up`)**: removes Core's `chainstate/`, `indexes/`,
+- **Core → satd (`up`)**: removes Core's `chainstate/`,
+  `chainstate_background/`, `indexes/`,
   `peers.dat` and `mempool.dat` and sets `reindex: true`, so satd's first
   start replays every block from the files into its own chainstate and
   indices. Verified on a Core-synced signet datadir: 322,807 headers indexed
@@ -145,7 +148,8 @@ everything implementation-specific is rebuilt from it:
   `rpc-cookie`, `tls/`, `secrets/`, `peers.dat`, `mempool.dat` and
   `startos-store.json`, and sets `reindexBlockchain: true` in Core's
   `store.json` so Core reindexes from the same files. Core comes back with a
-  default configuration. **This direction has not been run.**
+  default mainnet configuration. A flavor switch does not preserve a test-network
+  selection. **This direction has not been run.**
 
 The switch is a full reindex: satd validates every block again and rebuilds
 the transaction and address indices. On mainnet that is days, not hours. Do

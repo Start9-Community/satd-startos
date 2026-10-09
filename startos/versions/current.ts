@@ -4,6 +4,7 @@ import type { MigrationOpts } from '@start9labs/start-sdk/lib/version/VersionInf
 import { storeJson } from '../fileModels/store.json'
 import { sdk } from '../sdk'
 import { coreStoreJson } from '../fileModels/coreStore.json'
+import { removeNetworkFiles } from '../utils'
 
 const { main } = sdk.volumes
 
@@ -11,21 +12,28 @@ const { main } = sdk.volumes
 // everything else is rebuilt from it by a reindex on the receiving side.
 const fromCore = {
   up: async ({ effects }: MigrationOpts) => {
-    for (const p of ['chainstate', 'indexes', 'peers.dat', 'mempool.dat'])
-      await rm(main.subpath(p), { recursive: true, force: true })
+    await removeNetworkFiles([
+      'chainstate',
+      'chainstate_background',
+      'indexes',
+      'peers.dat',
+      'mempool.dat',
+    ])
     await storeJson.merge(effects, { reindex: true })
   },
   down: async ({ effects }: MigrationOpts) => {
-    for (const p of [
+    await removeNetworkFiles([
       'chainstate',
       'chainstate_background',
+      'peers.dat',
+      'mempool.dat',
+    ])
+    for (const p of [
       'bitcoin.conf',
       'authfile.toml',
       'rpc-cookie',
       'tls',
       'secrets',
-      'mempool.dat',
-      'peers.dat',
       'startos-store.json',
     ])
       await rm(main.subpath(p), { recursive: true, force: true })

@@ -1,9 +1,27 @@
+import { rm } from 'fs/promises'
 import { sdk } from './sdk'
+import { networks } from './networks'
 
 export { networks, p2pPorts } from './networks'
 export type { Network } from './networks'
 
 export const rootDir = '/var/lib/satd'
+
+export async function removeNetworkFiles(paths: readonly string[]) {
+  for (const network of Object.keys(networks)) {
+    const directory =
+      network === 'mainnet' ? '' : network === 'testnet' ? 'testnet3' : network
+    for (const path of paths) {
+      await rm(
+        sdk.volumes.main.subpath(directory ? `${directory}/${path}` : path),
+        {
+          recursive: true,
+          force: true,
+        },
+      )
+    }
+  }
+}
 
 // satd-init renders these into bitcoin.conf on every network; only the P2P
 // port follows the chain.

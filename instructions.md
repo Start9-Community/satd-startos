@@ -11,7 +11,9 @@ the rest: satd re-validates every block and builds its own indices, which on
 mainnet takes days. **Do not stop the service, restart it, reboot, or change its
 settings while that runs** — an interrupted rebuild starts downloading the
 remaining chain from the network instead. Switching back to Core or Knots is the
-same kind of rebuild on their side.
+same kind of rebuild on their side. Both directions keep block files for every
+network but discard its chainstate and indices. A flavor switch starts on mainnet;
+to use satd on a test network, select it with **Network** before starting.
 
 This node runs fully indexed — Electrum and Esplora both need the transaction
 and address indices, and pruning is incompatible with them — so budget for the
