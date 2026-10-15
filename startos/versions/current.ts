@@ -34,13 +34,18 @@ const fromCore = {
 }
 
 export const current = VersionInfo.of({
-  version: '#satd:0.5.2:0',
+  version: '#satd:0.6.1:0',
   releaseNotes: {
-    en_US: 'Initial release for StartOS',
-    es_ES: 'Lanzamiento inicial para StartOS',
-    de_DE: 'Erstveröffentlichung für StartOS',
-    pl_PL: 'Pierwsze wydanie dla StartOS',
-    fr_FR: 'Version initiale pour StartOS',
+    en_US:
+      'Initial release for StartOS, on satd 0.6.1. A switch from Bitcoin Core or Knots that is stopped or interrupted now continues from the block files on disk on the next start instead of downloading the rest of the chain, and stopping the service during the rebuild exits cleanly.',
+    es_ES:
+      'Lanzamiento inicial para StartOS, con satd 0.6.1. Un cambio desde Bitcoin Core o Knots que se detiene o se interrumpe ahora continúa en el siguiente arranque a partir de los archivos de bloques en disco, en lugar de descargar el resto de la cadena, y detener el servicio durante la reconstrucción termina limpiamente.',
+    de_DE:
+      'Erstveröffentlichung für StartOS, mit satd 0.6.1. Ein Wechsel von Bitcoin Core oder Knots, der gestoppt oder unterbrochen wird, setzt beim nächsten Start mit den Blockdateien auf der Festplatte fort, statt den Rest der Blockchain herunterzuladen, und das Stoppen des Dienstes während des Neuaufbaus beendet ihn sauber.',
+    pl_PL:
+      'Pierwsze wydanie dla StartOS, z satd 0.6.1. Przejście z Bitcoin Core lub Knots, które zostanie zatrzymane lub przerwane, przy następnym uruchomieniu jest kontynuowane z plików bloków na dysku zamiast pobierać resztę łańcucha, a zatrzymanie usługi podczas odbudowy kończy ją poprawnie.',
+    fr_FR:
+      "Version initiale pour StartOS, avec satd 0.6.1. Un passage depuis Bitcoin Core ou Knots arrêté ou interrompu reprend désormais au démarrage suivant à partir des fichiers de blocs sur le disque au lieu de télécharger le reste de la chaîne, et l'arrêt du service pendant la reconstruction se termine proprement.",
   },
   migrations: {
     up: async ({ effects }) => {},

@@ -51,7 +51,6 @@ entrypoint: two oneshots run before the daemon on every start.
 | `satd`      | `satd --datadir --chain …` | `satd` | The node. `--rpcauth` is appended once the RPC credential has been set.                                                   |
 
 `satd-init` is driven by environment: `NETWORK`, `SATD_P2P_PORT`,
-`SATD_STACK_SUBNET` (the container bridge, rendered as `rpcallowip`),
 `SATD_MCP=1`, `SATD_MCP_ALLOWED_HOSTS` and `SATD_TLS_HOSTNAME=satd.startos`.
 
 ## Volume and Data Layout
@@ -99,7 +98,7 @@ Being a flavor, this package satisfies no other service's dependency on
 matches `#satd:…`, so Lightning, electrs, Mempool and the rest report Bitcoin
 as unsatisfied while satd is installed. satd publishes no `rawblock` /
 `rawtx` ZMQ topics, so that is correct rather than conservative; a dependent
-that has verified itself against satd can opt in with `|| #satd:>=0.5.2:0`.
+that has verified itself against satd can opt in with `|| #satd:>=0.6.1:0`.
 
 ## Network Access and Interfaces
 
@@ -148,9 +147,10 @@ everything implementation-specific is rebuilt from it:
   default configuration. **This direction has not been run.**
 
 The switch is a full reindex: satd validates every block again and rebuilds
-the transaction and address indices. On mainnet that is days, not hours. Do
-not stop the service, reboot, or run an action that restarts satd while it
-runs — see Limitations.
+the transaction and address indices. On mainnet that is days, not hours.
+Stopping the service, a reboot or an action that restarts satd interrupts
+it safely: satd flushes and exits on SIGTERM, and the next start continues
+the reindex from the block files on disk, downloading nothing.
 
 ## Actions
 
@@ -220,7 +220,7 @@ network once started.
 
 ## Limitations and Differences
 
-1. **A flavor switch that is interrupted re-downloads the rest of the chain.** satd ignores SIGTERM while connecting blocks, so a stop during the reindex becomes a kill after `sigtermTimeout`; on the next start satd does not resume from the block files already on disk but goes back to network IBD from the last flushed tip, writing the re-downloaded blocks into new `blk*.dat` files beside the originals. Both are upstream defects; until they are fixed the switch must run uninterrupted.
+1. **The flavor switch is slow.** The reindex replays recent large blocks at a few hundred a minute at the default `dbcache`, so a mainnet switch takes days. It can be stopped and restarted (since satd 0.6.1); the speed is an upstream item for a later release.
 2. **No pruning.** Electrum and Esplora both require the transaction and address indices, which are incompatible with pruning; the upstream template runs fully indexed.
 3. **Not a drop-in for Core or Knots.** satd speaks Core's JSON-RPC but publishes no `rawblock` / `rawtx` ZMQ topics; see Dependencies for what that means for other services.
 4. **No wallet.** satd is a node; wallets connect through the Electrum interface.
@@ -245,7 +245,6 @@ file_models:
 startos_managed_env_vars:
   - NETWORK
   - SATD_MCP
-  - SATD_STACK_SUBNET
   - SATD_TLS_HOSTNAME
   - SATD_MCP_ALLOWED_HOSTS
   - SATD_P2P_PORT
