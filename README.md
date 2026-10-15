@@ -110,7 +110,7 @@ that has verified itself against satd can opt in with `|| #satd:>=0.6.1:0`.
 | `mcp`        | `api` | 8339          | HTTPS, rewrapped by the OS | The MCP server. Bearer token required; `Host` must be listed under **MCP Hostnames**.                |
 | `peer`       | `p2p` | 8333 / 38333 / 48333 / 18333 / 18444 | raw TCP       | Inbound Bitcoin P2P. The port follows the network.                                                  |
 
-satd's own TLS listeners (8336, 50002, 3001) are left unexported. MCP is
+satd's own TLS listeners (8336, 50002, 3001, 9336) are left unexported. MCP is
 the one listener satd insists on serving over its own TLS off-loopback, so the
 OS terminates the client's connection and opens a fresh one inward with
 certificate validation disabled — the inward leg presents a certificate from
@@ -224,7 +224,7 @@ network once started.
 2. **No pruning.** Electrum and Esplora both require the transaction and address indices, which are incompatible with pruning; the upstream template runs fully indexed.
 3. **Not a drop-in for Core or Knots.** satd speaks Core's JSON-RPC but publishes no `rawblock` / `rawtx` ZMQ topics; see Dependencies for what that means for other services.
 4. **No wallet.** satd is a node; wallets connect through the Electrum interface.
-5. **satd's own TLS listeners are not exported**, and its metrics endpoint (9332) is not exposed at all.
+5. **satd's own TLS listeners are not exported**, and its metrics endpoints (9332 and 9336) are not exposed at all.
 6. **One RPC credential**, with the fixed username `satd`; there is no multi-user `rpcauth` management.
 
 ---
