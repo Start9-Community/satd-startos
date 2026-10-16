@@ -1,3 +1,4 @@
 import { sdk } from './sdk'
 
-export const setDependencies = sdk.setupDependencies(async () => ({}))
+// None: satd needs no other service.
+export const dependencies = sdk.Dependencies.of()

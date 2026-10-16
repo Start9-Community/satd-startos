@@ -3,7 +3,7 @@ import { sdk } from '../sdk'
 
 // The network is a command-line argument, never a config line: satd accepts a
 // `signet=1` line in bitcoin.conf and then runs mainnet regardless.
-export const shape = z.object({
+export const shape = z.looseObject({
   network: z
     .enum(['mainnet', 'signet', 'testnet4', 'testnet', 'regtest'])
     .catch('mainnet'),
