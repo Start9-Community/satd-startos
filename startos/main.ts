@@ -4,7 +4,6 @@ import { storeJson } from './fileModels/store.json'
 import { i18n } from './i18n'
 import { sdk } from './sdk'
 import {
-  bridgeSubnet,
   GetBlockchainInfo,
   networks,
   p2pPorts,
@@ -95,7 +94,6 @@ export const main = sdk.setupMain(async ({ effects }) => {
           env: {
             NETWORK: network,
             SATD_MCP: '1',
-            SATD_STACK_SUBNET: bridgeSubnet,
             SATD_TLS_HOSTNAME: 'satd.startos',
             SATD_MCP_ALLOWED_HOSTS: mcpHostnames,
             SATD_P2P_PORT: String(p2pPorts[network]),

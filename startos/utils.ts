@@ -26,10 +26,6 @@ export const esploraInterfaceId = 'esplora'
 export const mcpInterfaceId = 'mcp'
 export const peerInterfaceId = 'peer'
 
-// lxcbr0: satd-init renders it as rpcallowip, and the OS reverse proxy and
-// every other package arrive from it.
-export const bridgeSubnet = '10.0.3.0/24'
-
 export const rpcUsername = 'satd'
 
 export const satdMounts = sdk.Mounts.of().mountVolume({

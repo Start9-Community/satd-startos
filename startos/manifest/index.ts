@@ -13,7 +13,7 @@ export const manifest = setupManifest({
   volumes: ['main'],
   images: {
     satd: {
-      source: { dockerTag: 'ghcr.io/epochbtc/satd:0.5.2' },
+      source: { dockerTag: 'ghcr.io/epochbtc/satd:0.6.1' },
       arch: ['x86_64', 'aarch64'],
     },
   },

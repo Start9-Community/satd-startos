@@ -27,8 +27,8 @@ Upstream is tracked as a prebuilt Docker image, `ghcr.io/epochbtc/satd`, pinned 
    and update `test/upstream/SOURCE`; `npm run check` fails if the network list or a P2P port
    moved.
 4. Diff `contrib/stack/satd/satd.conf.tmpl` and `satd-init` between the two tags for anything
-   `startos/main.ts` relies on: the `NETWORK`, `SATD_P2P_PORT`, `SATD_STACK_SUBNET`,
-   `SATD_MCP`, `SATD_MCP_ALLOWED_HOSTS` and `SATD_TLS_HOSTNAME` variables, the fixed listener
+   `startos/main.ts` relies on: the `NETWORK`, `SATD_P2P_PORT`, `SATD_MCP`,
+   `SATD_MCP_ALLOWED_HOSTS` and `SATD_TLS_HOSTNAME` variables, the fixed listener
    ports in `startos/utils.ts`, the `secrets/mcp-token` path, and the `rpc-cookie` symlink
    `sat-cli` is pointed at. Check `docs/manual/src/config-reference.md` for `rpcauth`, which
    the package passes on the command line.

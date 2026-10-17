@@ -8,10 +8,9 @@ installed. If you rely on any of them, this is not the node for you.
 
 Switching from Core or Knots keeps the block files you already have and rebuilds
 the rest: satd re-validates every block and builds its own indices, which on
-mainnet takes days. **Do not stop the service, restart it, reboot, or change its
-settings while that runs** — an interrupted rebuild starts downloading the
-remaining chain from the network instead. Switching back to Core or Knots is the
-same kind of rebuild on their side.
+mainnet takes days. Stopping, restarting or rebooting while it runs is safe:
+the next start continues the rebuild from the block files on disk. Switching
+back to Core or Knots is the same kind of rebuild on their side.
 
 This node runs fully indexed — Electrum and Esplora both need the transaction
 and address indices, and pruning is incompatible with them — so budget for the
