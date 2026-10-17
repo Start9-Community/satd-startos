@@ -1,36 +1,22 @@
-import { match, doesNotMatch } from 'node:assert/strict'
+import { doesNotMatch, match } from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-/**
- * The Network action's only effect is a write to the store. Nothing restarts
- * the node on its own: main re-runs — and so re-runs satd-init and satd with
- * the new `--chain=` — only because it reads the store with `.const`, which
- * the SDK defines as "reruns the context from which it has been called if the
- * underlying value changes". `.once` is the same call with that behaviour
- * removed.
- *
- * Swapping one for the other is not a type error, and every other test still
- * passes: the store updates, the UI shows the new network, the P2P port even
- * rebinds because interfaces.ts reads it reactively. Only the daemon stays on
- * the old chain, silently, until something else restarts it. That is what
- * shipped, and it took installing on a server to see.
- */
-/**
- * Read a source file with its comments stripped. These assertions are about
- * what the code does, and the comments here discuss the very constructs being
- * asserted against — `/readyz` is named in main.ts precisely to say it is not
- * used, and a naive grep reads that as the defect.
- */
+// Swapping `.const(effects)` for `.once()` is not a type error, and only the
+// daemon staying on the old chain after a Network change shows it.
 const read = (p: string) =>
   readFileSync(new URL(p, import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/.*$/gm, '$1')
 
-test('main reads the store reactively, so the Network action takes effect', () => {
+test('main reads the store reactively, so the actions take effect', () => {
   const src = read('../startos/main.ts')
-  match(src, /storeJson\.read\(\)\.const\(effects\)/)
-  doesNotMatch(src, /storeJson\.read\([^)]*\)\.once\(\)/)
+  match(src, /storeJson\s*\.read\(\(\{ network,[\s\S]*?\)\s*\.const\(effects\)/)
+  // The one-shot reindex flag is the only key read without a watch.
+  doesNotMatch(
+    src.replace(/storeJson\.read\(\(s\) => s\.reindex\)\.once\(\)/, ''),
+    /storeJson\.read\([\s\S]*?\)\.once\(\)/,
+  )
 })
 
 test('interfaces reads the store reactively, so the P2P port follows', () => {
@@ -38,13 +24,8 @@ test('interfaces reads the store reactively, so the P2P port follows', () => {
   match(src, /storeJson\.read\([\s\S]*?\)\.const\(effects\)/)
 })
 
-/**
- * `/readyz` is 503 until the tip is within six blocks of the headers tip.
- * As the daemon's ready gate that means the service never finishes starting
- * during an initial sync, and `sync-progress`, which requires it, never runs
- * — so the one screen the instructions tell the user to watch shows nothing
- * for the days it matters.
- */
+// /readyz is 503 until the tip is within six blocks of the headers tip, which
+// as the ready gate would hold the service on "starting" for the whole sync.
 test('the ready gate probes liveness, not readiness', () => {
   const src = read('../startos/main.ts')
   match(src, /satdSub\.exec\(\['\/usr\/local\/bin\/satd-healthcheck'\]\)/)
@@ -52,40 +33,19 @@ test('the ready gate probes liveness, not readiness', () => {
   doesNotMatch(src, /SATD_HEALTH_URL/)
 })
 
-/**
- * MCP's transport refuses any `Host` outside its allowlist, and the StartOS
- * proxy forwards the client's `Host` unchanged rather than validating or
- * rewriting it — so on this platform satd's check is the only one on that
- * path, and it sees whatever name the user typed. The MCP Hostnames action is
- * how those names reach it: the action writes the store, main reads the store
- * reactively, and satd-init turns the value into `mcpallowedhost=` lines.
- *
- * Dropping the environment variable is not a type error and breaks nothing
- * visible — every other interface keeps working, the action keeps accepting
- * input, and only MCP-by-hostname goes back to answering 403.
- */
-test('the MCP hostnames reach satd-init', () => {
+test('the MCP hostnames and token reach satd-init', () => {
   const src = read('../startos/main.ts')
   match(src, /SATD_MCP_ALLOWED_HOSTS:\s*mcpHostnames/)
   match(src, /const \{[^}]*mcpHostnames[^}]*\} = store/)
+  match(src, /secrets\/mcp-token/)
 })
 
-/**
- * satd is deliberately never told to accept any `Host`: the allowlist is
- * additive, and a package that emptied it would hand a rebound browser the
- * whole MCP tool surface.
- */
 test('the package never disables the MCP Host check', () => {
   const src = read('../startos/main.ts')
   doesNotMatch(src, /mcpallowanyhost|disable_allowed_hosts|mcptrustedproxy/i)
 })
 
-/**
- * satd 0.5.2's `verificationprogress` is the tip's timestamp divided by the
- * current time, so a node at genesis reports about 69%. The Blockchain Sync
- * check used to print it as a percentage, which told a user starting a
- * multi-day sync that it was two-thirds done.
- */
+// satd's verificationprogress is timestamp-based: ~69% at genesis.
 test('Blockchain Sync does not report verificationprogress', () => {
   doesNotMatch(read('../startos/main.ts'), /verificationprogress/)
 })

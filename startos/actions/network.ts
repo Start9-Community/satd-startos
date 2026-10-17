@@ -4,15 +4,6 @@ import { i18n } from '../i18n'
 import { sdk } from '../sdk'
 import { networks } from '../utils'
 
-/**
- * The only setting this package offers.
- *
- * `txindex` and `addressindex` are deliberately not options: Electrum and
- * Esplora both require them, so turning either off would break the two
- * surfaces that are the reason to run satd rather than Bitcoin Core. Pruning
- * is incompatible with txindex for the same reason, so there is no prune
- * option to offer either.
- */
 export const network = sdk.Action.withInput(
   'network',
 
@@ -38,7 +29,9 @@ export const network = sdk.Action.withInput(
     }),
   }),
 
-  async ({ effects }) => storeJson.read().once(),
+  async ({ effects }) => ({
+    network: (await storeJson.read((s) => s.network).once()) ?? undefined,
+  }),
 
   async ({ effects, input }) => {
     await storeJson.merge(effects, { network: input.network })
