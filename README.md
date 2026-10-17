@@ -44,11 +44,11 @@ One subcontainer, `satd-sub`, runs the unmodified upstream image on x86_64 and
 aarch64. The package supplies its own commands rather than the image's
 entrypoint: two oneshots run before the daemon on every start.
 
-| Step        | Command                     | User   | Purpose                                                                                                                  |
-| ----------- | --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `own-volume` | `chown -R satd:satd`       | `root` | StartOS mounts the volume root-owned; the image runs as `satd` (uid 2121).                                               |
-| `satd-init` | `/usr/local/bin/satd-init` | `satd` | The image's own first-run script: issues the per-install CA, renders `bitcoin.conf` for the network, hashes the MCP token into the authfile. |
-| `satd`      | `satd --datadir --chain …` | `satd` | The node. `--rpcauth` is appended once the RPC credential has been set.                                                   |
+| Step         | Command                    | User   | Purpose                                                                                                                                      |
+| ------------ | -------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `own-volume` | `chown -R satd:satd`       | `root` | StartOS mounts the volume root-owned; the image runs as `satd` (uid 2121).                                                                   |
+| `satd-init`  | `/usr/local/bin/satd-init` | `satd` | The image's own first-run script: issues the per-install CA, renders `bitcoin.conf` for the network, hashes the MCP token into the authfile. |
+| `satd`       | `satd --datadir --chain …` | `satd` | The node. `--rpcauth` is appended once the RPC credential has been set.                                                                      |
 
 `satd-init` is driven by environment: `NETWORK`, `SATD_P2P_PORT`,
 `SATD_MCP=1`, `SATD_MCP_ALLOWED_HOSTS` and `SATD_TLS_HOSTNAME=satd.startos`.
@@ -58,17 +58,17 @@ entrypoint: two oneshots run before the daemon on every start.
 Everything lives on one volume, `main`, mounted at `/var/lib/satd` — satd's
 datadir.
 
-| Path                    | Contents                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------- |
-| `blocks/`, `chainstate/` | Mainnet chain and chainstate; every index satd keeps lives inside `chainstate/`.      |
-| `<network>/`            | The same layout for each non-mainnet network (`signet/`, `testnet4/`, …).             |
-| `bitcoin.conf`          | Rendered by `satd-init` on every start; never edit it.                                |
-| `tls/`                  | The per-install CA and the certificate satd's own TLS listeners present.              |
-| `secrets/mcp-token`     | The MCP bearer token, written by the package from `startos-store.json` on every start. |
-| `authfile.toml`         | The token's hash, rendered by `satd-init`.                                            |
-| `rpc-cookie`            | A symlink `satd-init` points at the live network's cookie.                            |
-| `startos-store.json`    | This package's own state (below).                                                     |
-| `store.json`            | Bitcoin Core's package state, left in place across a flavor switch.                   |
+| Path                     | Contents                                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| `blocks/`, `chainstate/` | Mainnet chain and chainstate; every index satd keeps lives inside `chainstate/`.       |
+| `<network>/`             | The same layout for each non-mainnet network (`signet/`, `testnet4/`, …).              |
+| `bitcoin.conf`           | Rendered by `satd-init` on every start; never edit it.                                 |
+| `tls/`                   | The per-install CA and the certificate satd's own TLS listeners present.               |
+| `secrets/mcp-token`      | The MCP bearer token, written by the package from `startos-store.json` on every start. |
+| `authfile.toml`          | The token's hash, rendered by `satd-init`.                                             |
+| `rpc-cookie`             | A symlink `satd-init` points at the live network's cookie.                             |
+| `startos-store.json`     | This package's own state (below).                                                      |
+| `store.json`             | Bitcoin Core's package state, left in place across a flavor switch.                    |
 
 ## File Models
 
@@ -102,13 +102,13 @@ that has verified itself against satd can opt in with `|| #satd:>=0.6.1:0`.
 
 ## Network Access and Interfaces
 
-| Interface id | Type  | Internal port | Protocol                   | Serves                                                                                              |
-| ------------ | ----- | ------------- | -------------------------- | --------------------------------------------------------------------------------------------------- |
-| `rpc`        | `api` | 8332          | HTTP, TLS added by the OS  | Bitcoin Core-compatible JSON-RPC. Cookie auth inside the container; the **Set RPC Credentials** password from anywhere else. |
-| `electrum`   | `api` | 50001         | raw TCP, `tcp://` / `ssl://` | The Electrum server, for Sparrow, Electrum, BlueWallet, Zeus.                                      |
-| `esplora`    | `api` | 3000          | HTTP, TLS added by the OS  | The Esplora REST API under `/api`, unauthenticated.                                                 |
-| `mcp`        | `api` | 8339          | HTTPS, rewrapped by the OS | The MCP server. Bearer token required; `Host` must be listed under **MCP Hostnames**.                |
-| `peer`       | `p2p` | 8333 / 38333 / 48333 / 18333 / 18444 | raw TCP       | Inbound Bitcoin P2P. The port follows the network.                                                  |
+| Interface id | Type  | Internal port                        | Protocol                     | Serves                                                                                                                       |
+| ------------ | ----- | ------------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `rpc`        | `api` | 8332                                 | HTTP, TLS added by the OS    | Bitcoin Core-compatible JSON-RPC. Cookie auth inside the container; the **Set RPC Credentials** password from anywhere else. |
+| `electrum`   | `api` | 50001                                | raw TCP, `tcp://` / `ssl://` | The Electrum server, for Sparrow, Electrum, BlueWallet, Zeus.                                                                |
+| `esplora`    | `api` | 3000                                 | HTTP, TLS added by the OS    | The Esplora REST API under `/api`, unauthenticated.                                                                          |
+| `mcp`        | `api` | 8339                                 | HTTPS, rewrapped by the OS   | The MCP server. Bearer token required; `Host` must be listed under **MCP Hostnames**.                                        |
+| `peer`       | `p2p` | 8333 / 38333 / 48333 / 18333 / 18444 | raw TCP                      | Inbound Bitcoin P2P. The port follows the network.                                                                           |
 
 satd's own TLS listeners (8336, 50002, 3001, 9336) are left unexported. MCP is
 the one listener satd insists on serving over its own TLS off-loopback, so the
@@ -132,9 +132,12 @@ answers `403` by hostname until **MCP Hostnames** is set.
 `migrations.other` (keyed by Core's major series and the Knots flavor)
 handles it in both directions. `blocks/` is shared as-is — satd reads Core's
 `blk*.dat`/`rev*.dat` layout and honours Core's `xor.dat` key — and
-everything implementation-specific is rebuilt from it:
+everything implementation-specific is rebuilt from it. Both directions remove
+chainstate and peer/mempool state at the root and in every supported network
+directory, leaving each network's `blocks/` untouched:
 
-- **Core → satd (`up`)**: removes Core's `chainstate/`, `indexes/`,
+- **Core → satd (`up`)**: removes Core's `chainstate/`,
+  `chainstate_background/`, `indexes/`,
   `peers.dat` and `mempool.dat` and sets `reindex: true`, so satd's first
   start replays every block from the files into its own chainstate and
   indices. Verified on a Core-synced signet datadir: 322,807 headers indexed
@@ -144,7 +147,8 @@ everything implementation-specific is rebuilt from it:
   `rpc-cookie`, `tls/`, `secrets/`, `peers.dat`, `mempool.dat` and
   `startos-store.json`, and sets `reindexBlockchain: true` in Core's
   `store.json` so Core reindexes from the same files. Core comes back with a
-  default configuration. **This direction has not been run.**
+  default mainnet configuration. A flavor switch does not preserve a test-network
+  selection. **This direction has not been run.**
 
 The switch is a full reindex: satd validates every block again and rebuilds
 the transaction and address indices. On mainnet that is days, not hours.
