@@ -51,6 +51,7 @@ export const caCertificate = sdk.Action.withoutInput(
         copyable: true,
         qr: false,
         masked: false,
+        launchable: false,
       },
     }
   },
