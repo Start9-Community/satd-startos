@@ -5,6 +5,7 @@ import { i18n } from './i18n'
 import { sdk } from './sdk'
 import {
   GetBlockchainInfo,
+  electrumPort,
   networks,
   p2pPorts,
   rootDir,
@@ -111,6 +112,8 @@ export const main = sdk.setupMain(async ({ effects }) => {
             'satd',
             `--datadir=${rootDir}`,
             `--chain=${network}`,
+            // satd.conf binds Electrum on 0.0.0.0; StartOS sends IPv6 clients to the container's v6 address.
+            `--electrumbind=[::]:${electrumPort}`,
             ...(rpcAuth ? [`--rpcauth=${rpcAuth}`] : []),
             ...(reindex ? ['--reindex'] : []),
           ],
