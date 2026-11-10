@@ -110,6 +110,12 @@ that has verified itself against satd can opt in with `|| #satd:>=0.6.1:0`.
 | `mcp`        | `api` | 8339                                 | HTTPS, rewrapped by the OS   | The MCP server. Bearer token required; `Host` must be listed under **MCP Hostnames**.                                        |
 | `peer`       | `p2p` | 8333 / 38333 / 48333 / 18333 / 18444 | raw TCP                      | Inbound Bitcoin P2P. The port follows the network.                                                                           |
 
+The peer port listens on IPv4 only: with no `bind` set, satd binds `0.0.0.0`
+(`config.rs:2501`), and a single `[::]` socket would break its IP bans and
+`-whitelist`, which compare raw client addresses. StartOS still lists the
+interface's IPv6 addresses, and connections to them are refused — use an IPv4
+address.
+
 satd's own TLS listeners (8336, 50002, 3001, 9336) are left unexported. MCP is
 the one listener satd insists on serving over its own TLS off-loopback, so the
 OS terminates the client's connection and opens a fresh one inward with
