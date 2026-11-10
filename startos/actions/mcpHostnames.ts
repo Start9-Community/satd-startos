@@ -3,26 +3,9 @@ import { storeJson } from '../fileModels/store.json'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
 
-/**
- * The names clients put in the URL when they reach MCP.
- *
- * MCP's transport validates the `Host` header against an allowlist, which
- * defaults to loopback, as a defence against DNS rebinding. StartOS's reverse
- * proxy passes the client's `Host` through unchanged — it does no validation
- * of its own — so satd's check is the only thing standing between a rebound
- * browser and the tool surface, and it has to be told which names are real.
- * Until it is, every request that arrives by name is answered 403.
- *
- * This is asked of the operator rather than derived because the package
- * cannot discover it. `getHostInfo` returns only operator-added custom
- * domains, which are empty on a stock install; the `.local` name comes from
- * the server's own hostname, which no effect exposes; and inside the
- * container `hostname` is a generated container id, with no DNS path back to
- * the server's name.
- *
- * Loopback is always accepted by satd itself and is deliberately not asked
- * for here.
- */
+// The OS proxy forwards the client's Host header unchanged, and satd answers
+// 403 to any name outside its allowlist; nothing exposes the server's own
+// names to the package, so the operator supplies them.
 export const mcpHostnames = sdk.Action.withInput(
   'mcp-hostnames',
 
@@ -59,7 +42,10 @@ export const mcpHostnames = sdk.Action.withInput(
     }),
   }),
 
-  async ({ effects }) => storeJson.read().once(),
+  async ({ effects }) => ({
+    mcpHostnames:
+      (await storeJson.read((s) => s.mcpHostnames).once()) ?? undefined,
+  }),
 
   async ({ effects, input }) => {
     await storeJson.merge(effects, { mcpHostnames: input.mcpHostnames ?? '' })

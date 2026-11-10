@@ -26,13 +26,19 @@ TEMPLATE="${SATD_CONF_TEMPLATE:-/etc/satd/satd.conf.tmpl}"
 MKCA="${SATD_MKCA:-/usr/local/bin/satd-mkca}"
 
 NETWORK="${NETWORK:-signet}"
-SUBNET="${SATD_STACK_SUBNET:-10.77.0.0/24}"
 TLS_HOSTNAME="${SATD_TLS_HOSTNAME:-$(hostname)}"
 MCP_ENABLED="${SATD_MCP:-0}"
 # Further names to put in MCP's Host allowlist, comma-separated. The names
 # derived below cover the install's own hostname; this is for a reverse proxy
 # or a DNS alias in front of it, which satd-init cannot know about.
 MCP_EXTRA_HOSTS="${SATD_MCP_ALLOWED_HOSTS:-}"
+# The status page on the metrics listener. Off in the plain stack, on in the
+# appliance and the app-store packages. SATD_STATUS_ADVERTISE is the
+# connection strings it shows, whitespace-separated `surface=url` values; see
+# satd's `statusadvertise`.
+STATUS_PAGE="${SATD_STATUSPAGE:-0}"
+STATUS_ADVERTISE="${SATD_STATUS_ADVERTISE:-}"
+SATD_BIN="${SATD_BIN:-satd}"
 
 # Fixed inside the stack, on every network. Publishing and client
 # configuration therefore do not change when the network does; only the P2P
@@ -45,6 +51,7 @@ ELECTRUM_TLS_PORT=50002
 ESPLORA_PORT=3000
 ESPLORA_TLS_PORT=3001
 METRICS_PORT=9332
+METRICS_TLS_PORT=9336
 ZMQ_PORT=28332
 MCP_PORT=8339
 
@@ -99,7 +106,6 @@ render() {
         -e "s|@ESPLORA_TLS_PORT@|$ESPLORA_TLS_PORT|g" \
         -e "s|@METRICS_PORT@|$METRICS_PORT|g" \
         -e "s|@ZMQ_PORT@|$ZMQ_PORT|g" \
-        -e "s|@SUBNET@|$SUBNET|g" \
         -e "s|@TLS_DIR@|$TLS_DIR|g" \
         "$TEMPLATE"
 }
@@ -187,6 +193,61 @@ MCPCONF
     for h in "${mcp_hosts[@]}"; do
         printf 'mcpallowedhost=%s\n' "$h" >> "$CONF.new"
     done
+fi
+
+# The status page. Only for a satd that has it: satd refuses a config key it
+# does not know, so writing `statuspage=1` for an older binary would stop the
+# node from starting, and satd-init can run beside a satd that is not the one
+# it shipped with (the appliance installs a released binary next to this
+# script). An older satd gets no page, and says so here.
+if [[ "$STATUS_PAGE" == "1" ]]; then
+    if "$SATD_BIN" --help 2>/dev/null | grep -q -- '--statuspage'; then
+        {
+            printf '\n# --- status page ------------------------------------------------------------\n'
+            printf '# /status on the metrics listener above. Unauthenticated, like /metrics, and\n'
+            printf '# built to carry nothing secret.\n'
+            printf 'statuspage=1\n'
+            # An array, not an unquoted expansion: a URL may carry `?` or
+            # `*`, which the shell would glob.
+            read -r -a advertise <<< "$STATUS_ADVERTISE"
+            for a in ${advertise[@]+"${advertise[@]}"}; do
+                printf 'statusadvertise=%s\n' "$a"
+            done
+        } >> "$CONF.new"
+    else
+        echo "satd-init: SATD_STATUSPAGE=1, but $SATD_BIN has no status page; leaving it off" >&2
+    fi
+fi
+
+# The metrics listener over TLS, for the same reason and with the same guard
+# as the status page: the keys are new in 0.6.0 and an older satd refuses
+# them. On for every satd that has them, like the other TLS listeners in the
+# template — this is what makes the status page and /metrics reachable from
+# another machine without a proxy in front.
+if "$SATD_BIN" --help 2>/dev/null | grep -q -- '--metricstlsbind'; then
+    {
+        printf '\n# --- metrics over TLS --------------------------------------------------------\n'
+        printf 'metricstlsbind=0.0.0.0:%s\n' "$METRICS_TLS_PORT"
+        printf 'metricstlscert=%s/fullchain.crt\n' "$TLS_DIR"
+        printf 'metricstlskey=%s/leaf.key\n' "$TLS_DIR"
+    } >> "$CONF.new"
+fi
+
+# Chainstate upgrades. A release that changes the chainstate format (0.6.0's
+# schema 7) would otherwise refuse to start until someone ran
+# --reindex-chainstate by hand, which an app-store user has no way to do.
+# With this, satd rebuilds the chainstate from the block files it already has
+# on the first start after such an update, restarts a rebuild that a power
+# cut interrupted, and otherwise does nothing; nothing is downloaded, and the
+# status page shows the progress. Guarded like the keys above: an older satd
+# refuses a key it does not know.
+if "$SATD_BIN" --help 2>/dev/null | grep -q -- '--upgradechainstate'; then
+    {
+        printf '\n# --- chainstate upgrades ---------------------------------------------------\n'
+        printf '# Rebuild the chainstate from the block files when a release changes its\n'
+        printf '# format, or when a rebuild was interrupted. A no-op otherwise.\n'
+        printf 'upgradechainstate=1\n'
+    } >> "$CONF.new"
 fi
 
 # Operator additions, appended last so they win where satd takes the last
